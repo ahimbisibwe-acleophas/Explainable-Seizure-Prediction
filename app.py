@@ -8,7 +8,7 @@ import scipy.signal as signal
 app = Flask(__name__)
 
 # Load trained CNN model
-model = tf.keras.models.load_model("cnn_seizure_prediction_model.pkl")
+model = tf.keras.models.load_model("cnn_seizure_prediction_model(1).pkl")
 
 # Band power definitions (Hz)
 bands = {
