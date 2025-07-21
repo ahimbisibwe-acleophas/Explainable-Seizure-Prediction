@@ -4,7 +4,7 @@ import joblib
 import tensorflow as tf
 import scipy.signal as signal
 
-# Initializg Flask app
+# Initializing Flask app
 app = Flask(__name__)
 
 # Load trained CNN model
