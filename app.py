@@ -10,7 +10,7 @@ app = Flask(__name__)
 # Load trained CNN model
 model = tf.keras.models.load_model("cnn_seizure_prediction_model.h5")
 
-# Band definitions (Hz)
+# Band power definitions (Hz)
 bands = {
     "delta": (0.5, 4),
     "theta": (4, 8),
