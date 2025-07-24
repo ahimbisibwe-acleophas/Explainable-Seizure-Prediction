@@ -26,7 +26,7 @@ scaler = joblib.load("scaler.pkl")
 </head>
 <body>
   <div class="container text-center">
-    <h2>🧠 CNN Seizure Prediction System</h2>
+    <h2> CNN Seizure Prediction System</h2>
     <p class="text-muted">Upload feature file (CSV format) to predict seizures</p>
 
     <div class="mb-3">
