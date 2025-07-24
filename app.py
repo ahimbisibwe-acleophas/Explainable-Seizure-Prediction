@@ -93,9 +93,6 @@ scaler = joblib.load("scaler.pkl")
   </script>
 </body>
 </html>
-
-'''
-
 @app.route('/')
 def home():
     return render_template_string(HTML_TEMPLATE, prediction=None, probability=None)
