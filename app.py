@@ -5,14 +5,14 @@ import pandas as pd
 import tensorflow as tf
 import joblib
 
-# ✅ Suppress TensorFlow GPU usage and verbose logs
+#  Suppress TensorFlow GPU usage and verbose logs
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# ✅ Initialize Flask app
+#  Initialize Flask app
 app = Flask(__name__)
 
-# ✅ Load model and scaler
+#  Load model and scaler
 model = tf.keras.models.load_model("cnn_seizure_model.h5")
 scaler = joblib.load("scaler.pkl")
 
@@ -33,7 +33,7 @@ scaler = joblib.load("scaler.pkl")
       <input class="form-control" type="file" id="fileInput" accept=".csv">
     </div>
     
-    <button class="btn btn-primary" onclick="predict()">🧪 Predict</button>
+    <button class="btn btn-primary" onclick="predict()"> Predict</button>
 
     <div id="result" class="alert mt-4" role="alert"></div>
   </div>
@@ -71,14 +71,14 @@ scaler = joblib.load("scaler.pkl")
           
           if (result.error) {
             resultDiv.className = 'alert alert-danger';
-            resultDiv.innerText = "❌ " + result.error;
+            resultDiv.innerText = " " + result.error;
           } else {
             resultDiv.className = result.prediction === 1
               ? 'alert alert-warning'
               : 'alert alert-success';
 
             resultDiv.innerHTML = `
-              <strong>${result.prediction === 1 ? '⚠️ Seizure Likely!' : '✅ No Seizure Detected'}</strong><br>
+              <strong>${result.prediction === 1 ? ' Seizure Likely!' : ' No Seizure Detected'}</strong><br>
               Probability: ${(result.probability * 100).toFixed(2)}%
             `;
           }
@@ -107,15 +107,15 @@ def web_predict():
         if not file:
             return render_template_string(HTML_TEMPLATE, prediction=None, probability=None)
 
-        # ✅ Read CSV, extract features (first row)
+        #  Read CSV, extract features (first row)
         df = pd.read_csv(file)
         features = df.values[0].reshape(1, -1)  # only first row used
 
-        # ✅ Scale and reshape
+        #  Scale and reshape
         features_scaled = scaler.transform(features)
         features_scaled = features_scaled.reshape(1, 1, features_scaled.shape[1])
 
-        # ✅ Predict
+        #  Predict
         pred_proba = float(model.predict(features_scaled)[0][0])
         prediction = int(pred_proba > 0.5)
 
@@ -124,7 +124,7 @@ def web_predict():
     except Exception as e:
         return f"Error: {e}", 500
 
-# ✅ API endpoint remains available
+#  API endpoint remains available
 @app.route('/predict', methods=['POST'])
 def api_predict():
     try:
@@ -148,7 +148,7 @@ def api_predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ Run the app
+#  Run the app
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
