@@ -24,18 +24,33 @@ HTML_TEMPLATE = '''
     <title>🧠 CNN Seizure Prediction</title>
 </head>
 <body>
-    <h2>🧠 Seizure Prediction Interface</h2>
-    <form method="POST" action="/web_predict" enctype="multipart/form-data">
-        <label>Select a CSV file with EEG features:</label><br><br>
-        <input type="file" name="file" accept=".csv" required><br><br>
-        <input type="submit" value="Predict">
+  <div class="card">
+    <h1>Seizure Predictor</h1>
+    <form id="upload-form">
+      <input type="file" id="csv-file" name="file" accept=".csv" required>
+      <button type="submit" class="predict-button">Predict</button>
     </form>
+    <div id="results" class="section"></div>
+  </div>
 
-    {% if prediction is not none %}
-        <h3>📊 Prediction Result:</h3>
-        <p><strong>Status:</strong> {{ '⚠️ Seizure Likely' if prediction == 1 else '✅ No Seizure Detected' }}</p>
-        <p><strong>Probability:</strong> {{ probability }}</p>
-    {% endif %}
+  <script>
+    document.getElementById("upload-form").addEventListener("submit", async function(event) {
+      event.preventDefault();
+      const file = document.getElementById("csv-file").files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/upload", {
+        method: "POST",
+        body: formData
+      });
+
+      const html = await response.text();
+      document.getElementById("results").innerHTML = response.ok ? html : `<pre>${html}</pre>`;
+    });
+  </script>
 </body>
 </html>
 '''
