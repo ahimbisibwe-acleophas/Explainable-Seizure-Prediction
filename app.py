@@ -1,3 +1,6 @@
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force TensorFlow to use CPU only
+
 from flask import Flask, request, jsonify
 import numpy as np
 import tensorflow as tf
