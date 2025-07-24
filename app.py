@@ -1,47 +1,86 @@
 import os
-
-# ✅ Suppress TensorFlow GPU usage and verbose logs
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'        # Force TensorFlow to use CPU
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'         # Suppress TensorFlow warnings/info logs
-
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 import joblib
+
+# ✅ Suppress TensorFlow GPU usage and verbose logs
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # ✅ Initialize Flask app
 app = Flask(__name__)
 
-# ✅ Load pre-trained CNN model and feature scaler
+# ✅ Load model and scaler
 model = tf.keras.models.load_model("cnn_seizure_model.h5")
 scaler = joblib.load("scaler.pkl")
 
+# ✅ HTML template with upload form
+HTML_TEMPLATE = '''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🧠 CNN Seizure Prediction</title>
+</head>
+<body>
+    <h2>🧠 Seizure Prediction Interface</h2>
+    <form method="POST" action="/web_predict" enctype="multipart/form-data">
+        <label>Select a CSV file with EEG features:</label><br><br>
+        <input type="file" name="file" accept=".csv" required><br><br>
+        <input type="submit" value="Predict">
+    </form>
+
+    {% if prediction is not none %}
+        <h3>📊 Prediction Result:</h3>
+        <p><strong>Status:</strong> {{ '⚠️ Seizure Likely' if prediction == 1 else '✅ No Seizure Detected' }}</p>
+        <p><strong>Probability:</strong> {{ probability }}</p>
+    {% endif %}
+</body>
+</html>
+'''
+
 @app.route('/')
 def home():
-    return "🧠 CNN Seizure Prediction API is up and running!"
+    return render_template_string(HTML_TEMPLATE, prediction=None, probability=None)
 
-@app.route('/predict', methods=['POST'])
-def predict():
+@app.route('/web_predict', methods=['POST'])
+def web_predict():
     try:
-        # ✅ Parse incoming JSON
+        file = request.files['file']
+        if not file:
+            return render_template_string(HTML_TEMPLATE, prediction=None, probability=None)
+
+        # ✅ Read CSV, extract features (first row)
+        df = pd.read_csv(file)
+        features = df.values[0].reshape(1, -1)  # only first row used
+
+        # ✅ Scale and reshape
+        features_scaled = scaler.transform(features)
+        features_scaled = features_scaled.reshape(1, 1, features_scaled.shape[1])
+
+        # ✅ Predict
+        pred_proba = float(model.predict(features_scaled)[0][0])
+        prediction = int(pred_proba > 0.5)
+
+        return render_template_string(HTML_TEMPLATE, prediction=prediction, probability=round(pred_proba, 4))
+
+    except Exception as e:
+        return f"Error: {e}", 500
+
+# ✅ API endpoint remains available
+@app.route('/predict', methods=['POST'])
+def api_predict():
+    try:
         data = request.get_json(force=True)
         features = data.get("features")
 
         if features is None:
-            return jsonify({
-                "error": "Missing 'features' in request. Please provide a list of features."
-            }), 400
+            return jsonify({"error": "Missing 'features' in request"}), 400
 
-        # ✅ Convert features to NumPy array
-        features = np.array(features).reshape(1, -1)  # Shape: (1, num_features)
-
-        # ✅ Apply scaler
+        features = np.array(features).reshape(1, -1)
         features_scaled = scaler.transform(features)
-
-        # ✅ Reshape for Conv1D input (batch_size, time_step, features)
         features_scaled = features_scaled.reshape(1, 1, features_scaled.shape[1])
-
-        # ✅ Get prediction
         pred_proba = float(model.predict(features_scaled)[0][0])
         prediction = int(pred_proba > 0.5)
 
@@ -53,8 +92,7 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ Main entrypoint (for local or cloud run)
+# ✅ Run the app
 if __name__ == '__main__':
-    # Use Render-provided port if available
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
