@@ -16,43 +16,95 @@ app = Flask(__name__)
 model = tf.keras.models.load_model("cnn_seizure_model.h5")
 scaler = joblib.load("scaler.pkl")
 
-# ✅ HTML template with upload form
-HTML_TEMPLATE = '''
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>🧠 CNN Seizure Prediction</title>
+  <meta charset="UTF-8">
+  <title>Seizure Prediction</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      background-color: #f8f9fa;
+    }
+    .container {
+      margin-top: 80px;
+    }
+    #result {
+      margin-top: 20px;
+      display: none;
+    }
+  </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Seizure Predictor</h1>
-    <form id="upload-form">
-      <input type="file" id="csv-file" name="file" accept=".csv" required>
-      <button type="submit" class="predict-button">Predict</button>
-    </form>
-    <div id="results" class="section"></div>
+  <div class="container text-center">
+    <h2>🧠 CNN Seizure Prediction System</h2>
+    <p class="text-muted">Upload feature file (CSV format) to predict seizures</p>
+
+    <div class="mb-3">
+      <input class="form-control" type="file" id="fileInput" accept=".csv">
+    </div>
+    
+    <button class="btn btn-primary" onclick="predict()">🧪 Predict</button>
+
+    <div id="result" class="alert mt-4" role="alert"></div>
   </div>
 
   <script>
-    document.getElementById("upload-form").addEventListener("submit", async function(event) {
-      event.preventDefault();
-      const file = document.getElementById("csv-file").files[0];
-      if (!file) return;
+    async function predict() {
+      const input = document.getElementById('fileInput');
+      if (!input.files.length) {
+        alert('Please upload a CSV file.');
+        return;
+      }
 
-      const formData = new FormData();
-      formData.append("file", file);
+      const file = input.files[0];
+      const reader = new FileReader();
 
-      const response = await fetch("/upload", {
-        method: "POST",
-        body: formData
-      });
+      reader.onload = async function(event) {
+        const csv = event.target.result;
+        const rows = csv.trim().split('\n');
+        const firstRow = rows[0].split(',').map(parseFloat);
 
-      const html = await response.text();
-      document.getElementById("results").innerHTML = response.ok ? html : `<pre>${html}</pre>`;
-    });
+        if (firstRow.some(isNaN)) {
+          alert('Invalid data format in CSV. Ensure only numeric features are included.');
+          return;
+        }
+
+        try {
+          const response = await fetch('/predict', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ features: firstRow })
+          });
+
+          const result = await response.json();
+          const resultDiv = document.getElementById('result');
+          
+          if (result.error) {
+            resultDiv.className = 'alert alert-danger';
+            resultDiv.innerText = "❌ " + result.error;
+          } else {
+            resultDiv.className = result.prediction === 1
+              ? 'alert alert-warning'
+              : 'alert alert-success';
+
+            resultDiv.innerHTML = `
+              <strong>${result.prediction === 1 ? '⚠️ Seizure Likely!' : '✅ No Seizure Detected'}</strong><br>
+              Probability: ${(result.probability * 100).toFixed(2)}%
+            `;
+          }
+          resultDiv.style.display = 'block';
+        } catch (error) {
+          alert('Prediction failed: ' + error);
+        }
+      };
+
+      reader.readAsText(file);
+    }
   </script>
 </body>
 </html>
+
 '''
 
 @app.route('/')
