@@ -1,7 +1,8 @@
 import os
-# ✅ Suppress TensorFlow GPU & verbose logs
+
+# ✅ Suppress TensorFlow GPU usage and verbose logs
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'        # Force TensorFlow to use CPU
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'         # Suppress TensorFlow info/warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'         # Suppress TensorFlow warnings/info logs
 
 from flask import Flask, request, jsonify
 import numpy as np
@@ -27,18 +28,20 @@ def predict():
         features = data.get("features")
 
         if features is None:
-            return jsonify({"error": "Missing 'features' in request. Please provide a list of features."}), 400
+            return jsonify({
+                "error": "Missing 'features' in request. Please provide a list of features."
+            }), 400
 
-        # ✅ Convert to numpy array
+        # ✅ Convert features to NumPy array
         features = np.array(features).reshape(1, -1)  # Shape: (1, num_features)
 
-        # ✅ Apply saved scaler
+        # ✅ Apply scaler
         features_scaled = scaler.transform(features)
 
-        # ✅ Reshape for Conv1D input
+        # ✅ Reshape for Conv1D input (batch_size, time_step, features)
         features_scaled = features_scaled.reshape(1, 1, features_scaled.shape[1])
 
-        # ✅ Get prediction probability
+        # ✅ Get prediction
         pred_proba = float(model.predict(features_scaled)[0][0])
         prediction = int(pred_proba > 0.5)
 
@@ -50,6 +53,8 @@ def predict():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ Run locally (ignored in cloud deployment like Render)
+# ✅ Main entrypoint (for local or cloud run)
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Use Render-provided port if available
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
