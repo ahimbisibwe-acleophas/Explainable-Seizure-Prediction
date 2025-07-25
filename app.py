@@ -18,7 +18,8 @@ model = tf.keras.models.load_model("cnn_seizure_model.h5")
 scaler = joblib.load("scaler.pkl")
 
 #  HTML template
-html_template = 
+# HTML template
+html_template = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -42,7 +43,7 @@ html_template =
     {% endif %}
 </body>
 </html>
-
+"""
 
 @app.route('/')
 def index():
