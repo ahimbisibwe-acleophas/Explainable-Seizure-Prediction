@@ -17,6 +17,39 @@ app = Flask(__name__)
 model = tf.keras.models.load_model("cnn_seizure_model.h5")
 scaler = joblib.load("scaler.pkl")
 
+html_template = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Epileptic Seizure Predictor</title>
+</head>
+<body style="font-family: sans-serif; max-width: 700px; margin: auto; padding: 2em; background-color: #f9f9f9;">
+    <h1 style="text-align: center; color: #333;">Epileptic Seizure Predictor</h1>
+
+    <form method="POST" action="/predict_csv" enctype="multipart/form-data" style="margin-top: 2em;">
+        <label for="file"><strong>Select EEG Feature CSV File:</strong></label><br><br>
+        <input type="file" id="file" name="file" accept=".csv" required>
+        <br><br>
+        <button type="submit" style="padding: 10px 20px; font-size: 1em;">Run Prediction</button>
+    </form>
+
+    {% if prediction is not none %}
+        <hr style="margin-top: 3em;">
+        <h2 style="color: #444;">Prediction Result</h2>
+        <p style="font-size: 1.2em;">
+            <strong>Outcome:</strong>
+            <span style="color: {{ 'red' if prediction == 1 else 'green' }};">
+                {{ 'Seizure Likely' if prediction == 1 else 'No Seizure Detected' }}
+            </span>
+        </p>
+        <p style="font-size: 1.2em;">
+            <strong>Prediction Probability:</strong> {{ '%.2f'|format(probability * 100) }}%
+        </p>
+    {% endif %}
+</body>
+</html>
+"""
 
 
 @app.route('/')
