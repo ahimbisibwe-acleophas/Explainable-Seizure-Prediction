@@ -17,33 +17,7 @@ app = Flask(__name__)
 model = tf.keras.models.load_model("cnn_seizure_model.h5")
 scaler = joblib.load("scaler.pkl")
 
-#  HTML template
-# HTML template
-html_template = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title> Seizure Prediction</title>
-</head>
-<body style="font-family:sans-serif; max-width:600px; margin:auto; padding:2em;">
-    <h2> CNN Seizure Prediction Interface</h2>
-    <form method="POST" action="/predict_csv" enctype="multipart/form-data">
-        <label><strong>Upload your features CSV file:</strong></label><br><br>
-        <input type="file" name="file" accept=".csv" required>
-        <br><br>
-        <button type="submit"> Predict</button>
-    </form>
 
-    {% if prediction is not none %}
-        <hr>
-        <h3> Prediction Result</h3>
-        <p><strong>Prediction:</strong> {{ 'Seizure Likely' if prediction == 1 else 'No Seizure Detected' }}</p>
-        <p><strong>Probability:</strong> {{ '%.2f'|format(probability * 100) }}%</p>
-    {% endif %}
-</body>
-</html>
-"""
 
 @app.route('/')
 def index():
