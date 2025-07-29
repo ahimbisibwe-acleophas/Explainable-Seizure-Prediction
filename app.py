@@ -11,11 +11,11 @@ import json
 
 app = Flask(__name__)
 
-# Load model + scaler
+# Load model and scaler
 model = tf.keras.models.load_model("cnn_seizure_model.h5")
 scaler = joblib.load("scaler.pkl")
 
-# Try to load a saved feature schema; otherwise fall back to scaler.feature_names_in_
+# Load feature schema if available
 FEATURE_COLUMNS = []
 try:
     with open("feature_columns.json", "r") as f:
@@ -23,13 +23,42 @@ try:
 except Exception:
     FEATURE_COLUMNS = list(getattr(scaler, "feature_names_in_", []))
 
-html_template = """... (unchanged HTML) ..."""
+# HTML template (unchanged from your current code)
+html_template = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Epileptic Seizure Predictor</title>
+</head>
+<body style="font-family: sans-serif; max-width: 700px; margin: auto; padding: 2em; background-color: #f9f9f9;">
+    <h1 style="text-align: center; color: #333;">Epileptic Seizure Predictor</h1>
 
-@app.route('/')
-def index():
-    return render_template_string(html_template, prediction=None)
+    <form method="POST" action="/predict_csv" enctype="multipart/form-data" style="margin-top: 2em;">
+        <label for="file"><strong>Select EEG Feature CSV File:</strong></label><br><br>
+        <input type="file" id="file" name="file" accept=".csv" required>
+        <br><br>
+        <button type="submit" style="padding: 10px 20px; font-size: 1em;">Run Prediction</button>
+    </form>
 
-# Optional helper to inspect server schema
+    {% if prediction is not none %}
+        <hr style="margin-top: 3em;">
+        <h2 style="color: #444;">Prediction Result</h2>
+        <p style="font-size: 1.2em;">
+            <strong>Outcome:</strong>
+            <span style="color: {{ 'red' if prediction == 1 else 'green' }};">
+                {{ 'Seizure Likely' if prediction == 1 else 'No Seizure Detected' }}
+            </span>
+        </p>
+        <p style="font-size: 1.2em;">
+            <strong>Prediction Probability:</strong> {{ '%.2f'|format(probability * 100) }}%
+        </p>
+    {% endif %}
+</body>
+</html>
+"""
+
+# Optional schema endpoint to inspect server features
 @app.route('/schema', methods=['GET'])
 def schema():
     return jsonify({
@@ -37,22 +66,24 @@ def schema():
         "feature_names": FEATURE_COLUMNS
     })
 
-def align_to_schema(df_numeric: pd.DataFrame, required_cols: list[str]) -> pd.DataFrame:
+def align_to_schema(df_numeric, required_cols):
     """
-    Return a DF that has exactly required_cols in the same order,
-    filling missing with 0 and dropping extras.
+    Ensure uploaded CSV matches training schema: correct columns and order.
     """
-    if not required_cols:  # fallback if we do not have schema
+    if not required_cols:
         return df_numeric
 
-    # Ensure all required columns exist; fill missing with 0
     aligned = pd.DataFrame(index=df_numeric.index, columns=required_cols, dtype=float)
-    for c in required_cols:
-        aligned[c] = df_numeric[c] if c in df_numeric.columns else 0.0
+    for col in required_cols:
+        aligned[col] = df_numeric[col] if col in df_numeric.columns else 0.0
 
-    # Fill any NaNs with column means (or zeros)
+    # Fill any remaining NaNs
     aligned = aligned.fillna(aligned.mean(numeric_only=True)).fillna(0.0)
     return aligned
+
+@app.route('/')
+def index():
+    return render_template_string(html_template, prediction=None)
 
 @app.route('/predict_csv', methods=['POST'])
 def predict_csv():
@@ -63,35 +94,35 @@ def predict_csv():
 
         raw = pd.read_csv(file)
 
-        # Keep only numeric columns (your app expects pre-encoded numeric features)
-        df_num = raw.select_dtypes(include=[np.number]).copy()
+        # Keep only numeric columns
+        df_num = raw.select_dtypes(include=[np.number])
 
-        # Drop any label columns if they slipped through
-        for label_col in ['Class', 'Label', 'Target', 'Pre-Ictal Alert']:
-            if label_col in df_num.columns:
-                df_num = df_num.drop(columns=[label_col])
+        # Drop known label columns
+        for col in ['Class', 'Label', 'Target', 'Pre-Ictal Alert']:
+            if col in df_num.columns:
+                df_num = df_num.drop(columns=[col])
 
         if df_num.shape[0] == 0:
             return render_template_string(html_template, prediction=None)
 
-        # Align to training schema / scaler expectation
+        # Align to schema
         required = FEATURE_COLUMNS or list(getattr(scaler, "feature_names_in_", df_num.columns))
         X = align_to_schema(df_num, required)
 
-        # Take first row (your UI uses the first row only)
+        # First row only
         features = np.array(X.iloc[0]).reshape(1, -1)
 
         # Scale and reshape for Conv1D
         features_scaled = scaler.transform(features)
         features_scaled = features_scaled.reshape(1, 1, features_scaled.shape[1])
 
+        # Predict
         pred_proba = float(model.predict(features_scaled)[0][0])
         prediction = int(pred_proba > 0.5)
 
         return render_template_string(html_template, prediction=prediction, probability=pred_proba)
 
     except Exception as e:
-        # Return details to help debugging
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
