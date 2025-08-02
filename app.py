@@ -21,7 +21,7 @@ try:
     with open("feature_columns.json", "r") as f:
         FEATURE_COLUMNS = json.load(f)
 except Exception:
-    FEATURE_COLUMNS = list(getattr(scaler, "feature_names_in_", []))
+    FEATURE_COLUMNS = list(getattr("feature_names_in_", []))
 
 # HTML template for UI
 html_template = """
@@ -104,7 +104,7 @@ def predict_csv():
                 raw = raw.drop(columns=[col])
 
         # Align to feature schema
-        required = FEATURE_COLUMNS or list(getattr(scaler, "feature_names_in_", raw.columns))
+        required = FEATURE_COLUMNS or list(getattr("feature_names_in_", raw.columns))
         X = align_to_schema(raw, required)
 
         # Extract the first row of features
