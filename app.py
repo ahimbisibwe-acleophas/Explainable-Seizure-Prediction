@@ -7,23 +7,16 @@ from flask import Flask, request, jsonify, render_template_string
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import joblib
-import json
 
 app = Flask(__name__)
 
-# Load model and scaler
+# Load the CNN model
 model = tf.keras.models.load_model("cnn_model_47features.h5")
 
-# Load feature schema if available
-FEATURE_COLUMNS = []
-try:
-    with open("feature_columns.json", "r") as f:
-        FEATURE_COLUMNS = json.load(f)
-except Exception:
-    FEATURE_COLUMNS = list(getattr("feature_names_in_", []))
+# Get number of input features expected by the model
+EXPECTED_FEATURES = model.input_shape[-1]  # e.g., 47
 
-# HTML template for UI
+# HTML UI Template
 html_template = """
 <!DOCTYPE html>
 <html lang="en">
@@ -59,24 +52,19 @@ html_template = """
 """
 
 # Feature alignment utility
-def align_to_schema(df, required_cols):
+def align_to_expected_features(df, expected_n):
     """
-    Ensure uploaded CSV matches training schema: correct columns and order.
-    Missing columns are filled with 0, extra ones are dropped.
+    Align uploaded DataFrame to model's expected number of input features.
+    Fills missing with 0s or trims extras.
     """
-    if not required_cols:
-        return df.select_dtypes(include=[np.number])
+    df = df.select_dtypes(include=[np.number])
 
-    aligned = pd.DataFrame(index=df.index, columns=required_cols, dtype=float)
-    for col in required_cols:
-        if col in df.columns:
-            aligned[col] = pd.to_numeric(df[col], errors='coerce')
-        else:
-            aligned[col] = 0.0  # fill missing features with 0
-
-    # Fill NaNs just in case
-    aligned = aligned.fillna(aligned.mean(numeric_only=True)).fillna(0.0)
-    return aligned
+    if df.shape[1] > expected_n:
+        df = df.iloc[:, :expected_n]
+    elif df.shape[1] < expected_n:
+        for i in range(df.shape[1], expected_n):
+            df[f'dummy_{i}'] = 0.0
+    return df
 
 @app.route('/')
 def index():
@@ -85,8 +73,7 @@ def index():
 @app.route('/schema', methods=['GET'])
 def schema():
     return jsonify({
-        "n_features": len(FEATURE_COLUMNS),
-        "feature_names": FEATURE_COLUMNS
+        "expected_features": EXPECTED_FEATURES
     })
 
 @app.route('/predict_csv', methods=['POST'])
@@ -98,24 +85,19 @@ def predict_csv():
 
         raw = pd.read_csv(file)
 
-        # Drop known label columns
+        # Drop label columns if they exist
         for col in ['Class', 'Label', 'Target', 'Pre-Ictal Alert']:
             if col in raw.columns:
                 raw = raw.drop(columns=[col])
 
-        # Align to feature schema
-        required = FEATURE_COLUMNS or list(getattr("feature_names_in_", raw.columns))
-        X = align_to_schema(raw, required)
+        # Align to expected number of features
+        X = align_to_expected_features(raw, EXPECTED_FEATURES)
 
-        # Extract the first row of features
-        features = np.array(X.iloc[0]).reshape(1, -1)
-
-        # Scale and reshape for Conv1D input
-        features_scaled = scaler.transform(features)
-        features_scaled = features_scaled.reshape(1, 1, features_scaled.shape[1])
+        # Take first row
+        features = np.array(X.iloc[0]).reshape(1, 1, EXPECTED_FEATURES)
 
         # Predict
-        pred_proba = float(model.predict(features_scaled)[0][0])
+        pred_proba = float(model.predict(features)[0][0])
         prediction = int(pred_proba > 0.5)
 
         return render_template_string(html_template, prediction=prediction, probability=pred_proba)
