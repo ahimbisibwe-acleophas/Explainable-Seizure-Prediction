@@ -15,8 +15,8 @@ from lime import lime_tabular
 app = Flask(__name__)
 
 # Load the trained CNN model
-from keras.models import load_model as legacy_load_model
-model = legacy_load_model("cnn_model_47features.h5", compile=False)
+import tensorflow as tf
+model = tf.keras.models.load_model("cnn_model_47features.h5", compile=False)
 
 # model = tf.keras.models.load_model("cnn_model_47features.h5")
 EXPECTED_FEATURES = model.input_shape[-1]  # e.g., 47
