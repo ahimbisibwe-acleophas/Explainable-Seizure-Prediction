@@ -15,13 +15,11 @@ from lime import lime_tabular
 app = Flask(__name__)
 
 # Load the trained CNN model
-import tensorflow as tf
 model = tf.keras.models.load_model("cnn_model_47features.h5", compile=False)
 
-# model = tf.keras.models.load_model("cnn_model_47features.h5")
 EXPECTED_FEATURES = model.input_shape[-1]  # e.g., 47
 
-# HTML Template
+# HTML Template (same as your original)
 html_template = """
 <!DOCTYPE html>
 <html lang="en">
@@ -53,7 +51,6 @@ html_template = """
         </p>
         <br>
         <form method="POST" action="/explain_lime" enctype="multipart/form-data">
-            <input type="hidden" name="file" value="{{ filename }}">
             <label><strong>Re-upload CSV for Explanation:</strong></label><br><br>
             <input type="file" name="file" accept=".csv" required>
             <button type="submit" style="padding: 8px 16px;">Get LIME Explanation</button>
@@ -68,15 +65,19 @@ html_template = """
 </html>
 """
 
-# Helper: Align features to expected number
 def align_to_expected_features(df, expected_n):
-    df = df.select_dtypes(include=[np.number])
-    if df.shape[1] > expected_n:
-        df = df.iloc[:, :expected_n]
-    elif df.shape[1] < expected_n:
-        for i in range(df.shape[1], expected_n):
-            df[f'dummy_{i}'] = 0.0
-    return df
+    # Select numeric columns only
+    df_num = df.select_dtypes(include=[np.number]).copy()
+    n = df_num.shape[1]
+    if n > expected_n:
+        df_num = df_num.iloc[:, :expected_n]
+    elif n < expected_n:
+        # Add dummy columns with zeros to pad
+        for i in range(n, expected_n):
+            df_num[f'dummy_{i}'] = 0.0
+    # Ensure consistent column order (sort by column names)
+    df_num = df_num.reindex(sorted(df_num.columns), axis=1)
+    return df_num
 
 @app.route('/')
 def index():
@@ -95,11 +96,14 @@ def predict_csv():
 
         raw = pd.read_csv(file)
 
+        # Drop target columns if present
         for col in ['Class', 'Label', 'Target', 'Pre-Ictal Alert']:
             if col in raw.columns:
                 raw = raw.drop(columns=[col])
 
         X = align_to_expected_features(raw, EXPECTED_FEATURES)
+
+        # For prediction, reshape input to (batch, time_steps=1, features)
         features = np.array(X.iloc[0]).reshape(1, 1, EXPECTED_FEATURES)
 
         pred_proba = float(model.predict(features)[0][0])
@@ -124,9 +128,13 @@ def explain_lime():
                 df = df.drop(columns=[col])
 
         X = align_to_expected_features(df, EXPECTED_FEATURES)
+        # Sort columns again to match order in training data
+        X = X.reindex(sorted(X.columns), axis=1)
+
         sample = X.iloc[0].values.reshape(1, -1)
 
         def predict_fn(x):
+            # x is 2D: (samples, features), reshape to model input shape
             return model.predict(x.reshape(x.shape[0], 1, x.shape[1]))
 
         explainer = lime_tabular.LimeTabularExplainer(
@@ -163,19 +171,28 @@ def explain_shap():
                 df = df.drop(columns=[col])
 
         X = align_to_expected_features(df, EXPECTED_FEATURES)
+        X = X.reindex(sorted(X.columns), axis=1)
 
+        # Use background sample for KernelExplainer
         background = X.sample(n=min(100, len(X)), random_state=42).values
-        explainer = shap.KernelExplainer(
-            model=lambda x: model.predict(x.reshape((x.shape[0], 1, x.shape[1]))),
-            data=background
-        )
+
+        def model_predict(x):
+            # x shape (batch, features)
+            return model.predict(x.reshape(x.shape[0], 1, x.shape[1]))
+
+        explainer = shap.KernelExplainer(model_predict, background)
 
         shap_values = explainer.shap_values(X.iloc[:1].values)
+
+        # Debug print to check lengths
+        print(f"Features count: {X.shape[1]}")
+        print(f"SHAP values count: {len(shap_values[0][0])}")
 
         shap.force_plot(
             explainer.expected_value[0],
             shap_values[0][0],
             features=X.iloc[0],
+            feature_names=X.columns.tolist(),
             matplotlib=True,
             show=False
         )
