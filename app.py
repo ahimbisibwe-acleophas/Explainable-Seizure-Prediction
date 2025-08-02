@@ -12,7 +12,7 @@ import json
 app = Flask(__name__)
 
 # Load model and scaler
-model = tf.keras.models.load_model("cnn_seizure_model.h5")
+model = tf.keras.models.load_model("cnn_model_47features.h5")
 scaler = joblib.load("scaler.pkl")
 
 # Load feature schema if available
