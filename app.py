@@ -1,4 +1,4 @@
-#import library
+# Disable GPU usage and suppress TF logs
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -24,7 +24,7 @@ try:
 except Exception:
     FEATURE_COLUMNS = list(getattr(scaler, "feature_names_in_", []))
 
-# HTML template (unchanged from your current code)
+# HTML template for UI
 html_template = """
 <!DOCTYPE html>
 <html lang="en">
@@ -59,32 +59,36 @@ html_template = """
 </html>
 """
 
-# Optional schema endpoint to inspect server features
-@app.route('/schema', methods=['GET'])
-def schema():
-    return jsonify({
-        "n_features": len(FEATURE_COLUMNS),
-        "feature_names": FEATURE_COLUMNS
-    })
-
-def align_to_schema(df_numeric, required_cols):
+# Feature alignment utility
+def align_to_schema(df, required_cols):
     """
     Ensure uploaded CSV matches training schema: correct columns and order.
+    Missing columns are filled with 0, extra ones are dropped.
     """
     if not required_cols:
-        return df_numeric
+        return df.select_dtypes(include=[np.number])
 
-    aligned = pd.DataFrame(index=df_numeric.index, columns=required_cols, dtype=float)
+    aligned = pd.DataFrame(index=df.index, columns=required_cols, dtype=float)
     for col in required_cols:
-        aligned[col] = df_numeric[col] if col in df_numeric.columns else 0.0
+        if col in df.columns:
+            aligned[col] = pd.to_numeric(df[col], errors='coerce')
+        else:
+            aligned[col] = 0.0  # fill missing features with 0
 
-    # Fill any remaining NaNs
+    # Fill NaNs just in case
     aligned = aligned.fillna(aligned.mean(numeric_only=True)).fillna(0.0)
     return aligned
 
 @app.route('/')
 def index():
     return render_template_string(html_template, prediction=None)
+
+@app.route('/schema', methods=['GET'])
+def schema():
+    return jsonify({
+        "n_features": len(FEATURE_COLUMNS),
+        "feature_names": FEATURE_COLUMNS
+    })
 
 @app.route('/predict_csv', methods=['POST'])
 def predict_csv():
@@ -95,25 +99,19 @@ def predict_csv():
 
         raw = pd.read_csv(file)
 
-        # Keep only numeric columns
-        df_num = raw.select_dtypes(include=[np.number])
-
         # Drop known label columns
         for col in ['Class', 'Label', 'Target', 'Pre-Ictal Alert']:
-            if col in df_num.columns:
-                df_num = df_num.drop(columns=[col])
+            if col in raw.columns:
+                raw = raw.drop(columns=[col])
 
-        if df_num.shape[0] == 0:
-            return render_template_string(html_template, prediction=None)
+        # Align to feature schema
+        required = FEATURE_COLUMNS or list(getattr(scaler, "feature_names_in_", raw.columns))
+        X = align_to_schema(raw, required)
 
-        # Align to schema
-        required = FEATURE_COLUMNS or list(getattr(scaler, "feature_names_in_", df_num.columns))
-        X = align_to_schema(df_num, required)
-
-        # First row only
+        # Extract the first row of features
         features = np.array(X.iloc[0]).reshape(1, -1)
 
-        # Scale and reshape for Conv1D
+        # Scale and reshape for Conv1D input
         features_scaled = scaler.transform(features)
         features_scaled = features_scaled.reshape(1, 1, features_scaled.shape[1])
 
