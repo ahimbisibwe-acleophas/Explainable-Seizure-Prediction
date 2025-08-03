@@ -1,3 +1,4 @@
+# Disable GPU usage and suppress TensorFlow logs
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -11,47 +12,45 @@ import matplotlib.pyplot as plt
 from lime import lime_tabular
 
 app = Flask(__name__)
-
-# Load model
 model = tf.keras.models.load_model("cnn_model_47features.h5", compile=False)
-EXPECTED_FEATURES = model.input_shape[-1]
 
-# Full HTML template
-html_template = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>CNN Seizure Prediction Interface</title>
-</head>
-<body style="font-family: Arial, sans-serif; max-width: 700px; margin: auto; padding: 20px;">
-    <h2>Upload EEG Features CSV</h2>
-    <form method="POST" action="/predict_csv" enctype="multipart/form-data">
-        <input type="file" name="file" required>
-        <button type="submit">Predict</button>
+EXPECTED_FEATURES = model.input_shape[-1]  # e.g., 47
+
+# HTML Template
+html_template = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Epileptic Seizure Predictor</title></head>
+<body style="font-family:sans-serif; max-width:700px; margin:auto; padding:2em; background-color:#f9f9f9;">
+    <h1 style="text-align:center; color:#333;">Epileptic Seizure Predictor</h1>
+    <form method="POST" action="/predict_csv" enctype="multipart/form-data" style="margin-top:2em;">
+        <label for="file"><strong>Select EEG Feature CSV File:</strong></label><br><br>
+        <input type="file" id="file" name="file" accept=".csv" required><br><br>
+        <button type="submit" style="padding:10px 20px; font-size:1em;">Run Prediction</button>
     </form>
     {% if prediction is not none %}
-        <h3>Prediction: {{ 'Seizure' if prediction else 'No Seizure' }}</h3>
-        <p>Probability: {{ probability | round(4) }}</p>
+        <hr style="margin-top:3em;">
+        <h2 style="color:#444;">Prediction Result</h2>
+        <p style="font-size:1.2em;">
+            <strong>Outcome:</strong>
+            <span style="color: {{ 'red' if prediction == 1 else 'green' }};">
+                {{ 'Seizure Likely' if prediction == 1 else 'No Seizure Detected' }}
+            </span>
+        </p>
+        <p style="font-size:1.2em;"><strong>Prediction Probability:</strong> {{ '%.2f'|format(probability * 100) }}%</p><br>
+
+        <form method="POST" action="/explain_lime" enctype="multipart/form-data">
+            <label><strong>Re-upload CSV for Explanation:</strong></label><br><br>
+            <input type="file" name="file" accept=".csv" required>
+            <button type="submit" style="padding:8px 16px;">Get LIME Explanation</button>
+        </form><br>
+        <form method="POST" action="/explain_shap" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".csv" required>
+            <button type="submit" style="padding:8px 16px;">Get SHAP Explanation</button>
+        </form>
     {% endif %}
-
-    <hr>
-
-    <h2>LIME Explanation</h2>
-    <form method="POST" action="/explain_lime" enctype="multipart/form-data">
-        <input type="file" name="file" required>
-        <button type="submit">Generate LIME Explanation</button>
-    </form>
-
-    <h2>SHAP Explanation</h2>
-    <form method="POST" action="/explain_shap" enctype="multipart/form-data">
-        <input type="file" name="file" required>
-        <button type="submit">Generate SHAP Explanation</button>
-    </form>
-</body>
-</html>
+</body></html>
 """
 
-# Feature alignment helper
+# Utility to align features
 def align_to_expected_features(df, expected_n):
     df = df.select_dtypes(include=[np.number])
     if df.shape[1] > expected_n:
@@ -77,6 +76,7 @@ def predict_csv():
             return render_template_string(html_template, prediction=None)
 
         raw = pd.read_csv(file)
+
         for col in ['Class', 'Label', 'Target', 'Pre-Ictal Alert']:
             if col in raw.columns:
                 raw = raw.drop(columns=[col])
@@ -124,7 +124,7 @@ def explain_lime():
         exp = explainer.explain_instance(
             data_row=sample,
             predict_fn=predict_fn,
-            num_features=25  # ✅ Show 25 features
+            num_features=25  # Show top 25 features
         )
 
         explanation_path = "/tmp/lime_explanation.html"
@@ -148,27 +148,30 @@ def explain_shap():
 
         X = align_to_expected_features(df, EXPECTED_FEATURES)
         X = X.reindex(sorted(X.columns), axis=1)
-        feature_names = X.columns.tolist()
 
+        sample = X.iloc[[0]]
         background = X.sample(n=min(100, len(X)), random_state=42)
-        background_tensor = tf.convert_to_tensor(background.values.reshape(-1, 1, EXPECTED_FEATURES), dtype=tf.float32)
 
-        sample = X.iloc[[0]].values.reshape(1, 1, EXPECTED_FEATURES)
-        sample_2d = X.iloc[[0]].values  # Needed for SHAP plot
+        def wrapped_model(x):
+            reshaped = x.reshape(x.shape[0], 1, x.shape[1])
+            return model.predict(reshaped)
 
-        explainer = shap.GradientExplainer(model, background_tensor)
-        shap_values = explainer.shap_values(sample)
+        explainer = shap.Explainer(wrapped_model, background.values)
+        shap_values = explainer(sample.values)
 
-        shap_path = "/tmp/shap_explanation.png"
-        shap.plots._waterfall.waterfall_legacy(
-            shap_values[0][0],
-            feature_names=feature_names,
-            max_display=25,
+        shap.force_plot(
+            base_value=explainer.expected_value[0],
+            shap_values=shap_values[0].values,
+            features=sample.values[0],
+            feature_names=X.columns.tolist(),
+            matplotlib=True,
             show=False
         )
 
+        shap_path = "/tmp/shap_explanation.png"
         plt.savefig(shap_path, bbox_inches='tight')
         plt.close()
+
         return send_file(shap_path, mimetype='image/png')
 
     except Exception as e:
