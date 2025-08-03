@@ -16,8 +16,40 @@ app = Flask(__name__)
 model = tf.keras.models.load_model("cnn_model_47features.h5", compile=False)
 EXPECTED_FEATURES = model.input_shape[-1]
 
-# Basic HTML page (same as yours)
-html_template = """<html>...unchanged HTML...</html>"""  # Use your original HTML template here
+# Full HTML template
+html_template = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CNN Seizure Prediction Interface</title>
+</head>
+<body style="font-family: Arial, sans-serif; max-width: 700px; margin: auto; padding: 20px;">
+    <h2>Upload EEG Features CSV</h2>
+    <form method="POST" action="/predict_csv" enctype="multipart/form-data">
+        <input type="file" name="file" required>
+        <button type="submit">Predict</button>
+    </form>
+    {% if prediction is not none %}
+        <h3>Prediction: {{ 'Seizure' if prediction else 'No Seizure' }}</h3>
+        <p>Probability: {{ probability | round(4) }}</p>
+    {% endif %}
+
+    <hr>
+
+    <h2>LIME Explanation</h2>
+    <form method="POST" action="/explain_lime" enctype="multipart/form-data">
+        <input type="file" name="file" required>
+        <button type="submit">Generate LIME Explanation</button>
+    </form>
+
+    <h2>SHAP Explanation</h2>
+    <form method="POST" action="/explain_shap" enctype="multipart/form-data">
+        <input type="file" name="file" required>
+        <button type="submit">Generate SHAP Explanation</button>
+    </form>
+</body>
+</html>
+"""
 
 # Feature alignment helper
 def align_to_expected_features(df, expected_n):
@@ -92,7 +124,7 @@ def explain_lime():
         exp = explainer.explain_instance(
             data_row=sample,
             predict_fn=predict_fn,
-            num_features=25  # UPDATED: now showing 25 features
+            num_features=25  # ✅ Show 25 features
         )
 
         explanation_path = "/tmp/lime_explanation.html"
@@ -122,7 +154,7 @@ def explain_shap():
         background_tensor = tf.convert_to_tensor(background.values.reshape(-1, 1, EXPECTED_FEATURES), dtype=tf.float32)
 
         sample = X.iloc[[0]].values.reshape(1, 1, EXPECTED_FEATURES)
-        sample_2d = X.iloc[[0]].values  # Needed for shap_values display
+        sample_2d = X.iloc[[0]].values  # Needed for SHAP plot
 
         explainer = shap.GradientExplainer(model, background_tensor)
         shap_values = explainer.shap_values(sample)
@@ -131,7 +163,7 @@ def explain_shap():
         shap.plots._waterfall.waterfall_legacy(
             shap_values[0][0],
             feature_names=feature_names,
-            max_display=25,  # Show up to 25 features
+            max_display=25,
             show=False
         )
 
