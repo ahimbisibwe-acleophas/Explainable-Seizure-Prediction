@@ -1,93 +1,73 @@
-# Disable GPU usage and suppress TensorFlow logs
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-from flask import Flask, request, jsonify, render_template_string, send_file
-import numpy as np
+from flask import Flask, request, jsonify, send_file, render_template_string
 import pandas as pd
+import numpy as np
+import joblib
 import tensorflow as tf
+import lime
+import lime.lime_tabular
 import shap
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from lime import lime_tabular
 
 app = Flask(__name__)
-model = tf.keras.models.load_model("cnn_model_47features.h5", compile=False)
 
-EXPECTED_FEATURES = model.input_shape[-1]  # e.g., 47
+# Load your trained model
+model = tf.keras.models.load_model("model.h5")
+EXPECTED_FEATURES = joblib.load("expected_features.pkl")
 
-# HTML Template
-html_template = """<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>Epileptic Seizure Predictor</title></head>
-<body style="font-family:sans-serif; max-width:700px; margin:auto; padding:2em; background-color:#f9f9f9;">
-    <h1 style="text-align:center; color:#333;">Epileptic Seizure Predictor</h1>
-    <form method="POST" action="/predict_csv" enctype="multipart/form-data" style="margin-top:2em;">
-        <label for="file"><strong>Select EEG Feature CSV File:</strong></label><br><br>
-        <input type="file" id="file" name="file" accept=".csv" required><br><br>
-        <button type="submit" style="padding:10px 20px; font-size:1em;">Run Prediction</button>
-    </form>
-    {% if prediction is not none %}
-        <hr style="margin-top:3em;">
-        <h2 style="color:#444;">Prediction Result</h2>
-        <p style="font-size:1.2em;">
-            <strong>Outcome:</strong>
-            <span style="color: {{ 'red' if prediction == 1 else 'green' }};">
-                {{ 'Seizure Likely' if prediction == 1 else 'No Seizure Detected' }}
-            </span>
-        </p>
-        <p style="font-size:1.2em;"><strong>Prediction Probability:</strong> {{ '%.2f'|format(probability * 100) }}%</p><br>
-
-        <form method="POST" action="/explain_lime" enctype="multipart/form-data">
-            <label><strong>Re-upload CSV for Explanation:</strong></label><br><br>
-            <input type="file" name="file" accept=".csv" required>
-            <button type="submit" style="padding:8px 16px;">Get LIME Explanation</button>
-        </form><br>
-        <form method="POST" action="/explain_shap" enctype="multipart/form-data">
-            <input type="file" name="file" accept=".csv" required>
-            <button type="submit" style="padding:8px 16px;">Get SHAP Explanation</button>
-        </form>
-    {% endif %}
-</body></html>
-"""
-
-# Utility to align features
-def align_to_expected_features(df, expected_n):
-    df = df.select_dtypes(include=[np.number])
-    if df.shape[1] > expected_n:
-        df = df.iloc[:, :expected_n]
-    elif df.shape[1] < expected_n:
-        for i in range(df.shape[1], expected_n):
-            df[f'dummy_{i}'] = 0.0
-    return df
+def align_to_expected_features(df, expected_features):
+    df = df.copy()
+    for col in expected_features:
+        if col not in df.columns:
+            df[col] = 0
+    return df[expected_features]
 
 @app.route('/')
-def index():
-    return render_template_string(html_template, prediction=None)
-
-@app.route('/schema', methods=['GET'])
-def schema():
-    return jsonify({"expected_features": EXPECTED_FEATURES})
+def home():
+    return render_template_string("""
+    <h2>Upload CSV for Prediction and Explanation</h2>
+    <form method="POST" action="/predict_csv" enctype="multipart/form-data">
+      <input type="file" name="file">
+      <input type="submit" value="Predict">
+    </form>
+    <form method="POST" action="/explain_lime" enctype="multipart/form-data">
+      <input type="file" name="file">
+      <input type="submit" value="Explain with LIME">
+    </form>
+    <form method="POST" action="/explain_shap" enctype="multipart/form-data">
+      <input type="file" name="file">
+      <input type="submit" value="Explain with SHAP">
+    </form>
+    """)
 
 @app.route('/predict_csv', methods=['POST'])
 def predict_csv():
     try:
         file = request.files.get('file')
         if not file:
-            return render_template_string(html_template, prediction=None)
+            return jsonify({"error": "No file uploaded"}), 400
 
-        raw = pd.read_csv(file)
-
+        df = pd.read_csv(file)
         for col in ['Class', 'Label', 'Target', 'Pre-Ictal Alert']:
-            if col in raw.columns:
-                raw = raw.drop(columns=[col])
+            if col in df.columns:
+                df = df.drop(columns=[col])
 
-        X = align_to_expected_features(raw, EXPECTED_FEATURES)
-        features = np.array(X.iloc[0]).reshape(1, 1, EXPECTED_FEATURES)
+        X = align_to_expected_features(df, EXPECTED_FEATURES)
+        X = X.reindex(sorted(X.columns), axis=1)
+        X_reshaped = X.values.reshape(X.shape[0], 1, X.shape[1])
 
-        pred_proba = float(model.predict(features)[0][0])
-        prediction = int(pred_proba > 0.5)
+        preds = model.predict(X_reshaped)
+        results = pd.DataFrame({"Prediction_Probability": preds.flatten()})
+        results["Prediction_Label"] = (results["Prediction_Probability"] > 0.5).astype(int)
 
-        return render_template_string(html_template, prediction=prediction, probability=pred_proba)
+        output_path = "/tmp/predictions.csv"
+        results.to_csv(output_path, index=False)
+        return send_file(output_path, mimetype='text/csv')
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -113,7 +93,7 @@ def explain_lime():
             preds = model.predict(x_reshaped)
             return np.hstack([1 - preds, preds])
 
-        explainer = lime_tabular.LimeTabularExplainer(
+        explainer = lime.lime_tabular.LimeTabularExplainer(
             training_data=X.values,
             feature_names=X.columns.tolist(),
             mode="classification",
@@ -124,7 +104,7 @@ def explain_lime():
         exp = explainer.explain_instance(
             data_row=sample,
             predict_fn=predict_fn,
-            num_features=25  # Show top 25 features
+            num_features=25
         )
 
         explanation_path = "/tmp/lime_explanation.html"
@@ -150,22 +130,20 @@ def explain_shap():
         X = X.reindex(sorted(X.columns), axis=1)
 
         sample = X.iloc[[0]]
-        background = X.sample(n=min(100, len(X)), random_state=42)
+        background = shap.sample(X, nsamples=50, random_state=0)
 
         def wrapped_model(x):
             reshaped = x.reshape(x.shape[0], 1, x.shape[1])
             return model.predict(reshaped)
 
-        explainer = shap.Explainer(wrapped_model, background.values)
-        shap_values = explainer(sample.values)
+        explainer = shap.KernelExplainer(wrapped_model, background.values)
+        shap_values = explainer.shap_values(sample.values)
 
-        shap.force_plot(
-            base_value=explainer.expected_value[0],
-            shap_values=shap_values[0].values,
-            features=sample.values[0],
+        shap.summary_plot(
+            shap_values[0], sample.values,
             feature_names=X.columns.tolist(),
-            matplotlib=True,
-            show=False
+            show=False,
+            plot_type="bar"
         )
 
         shap_path = "/tmp/shap_explanation.png"
@@ -178,5 +156,4 @@ def explain_shap():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(debug=True)
