@@ -102,7 +102,7 @@ def predict_and_explain():
         exp = explainer.explain_instance(
             data_row=sample,
             predict_fn=predict_fn,
-            num_features=min(25, EXPECTED_FEATURES)
+            num_features=min(15, EXPECTED_FEATURES)
         )
 
         explanation_path = "static/lime_explanation.html"
