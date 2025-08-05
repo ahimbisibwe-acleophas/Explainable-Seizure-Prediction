@@ -3,12 +3,10 @@ import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-from flask import Flask, request, jsonify, render_template_string, send_file
+from flask import Flask, request, jsonify, render_template_string
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import shap
-import matplotlib.pyplot as plt
 from lime import lime_tabular
 
 app = Flask(__name__)
@@ -22,8 +20,29 @@ html_template = """
 <head>
     <meta charset="UTF-8">
     <title>Epileptic Seizure Predictor</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: auto;
+            padding: 2em;
+            background-color: #f9f9f9;
+        }
+        .two-columns {
+            display: flex;
+            gap: 20px;
+            margin-top: 1em;
+        }
+        .column {
+            flex: 1;
+            background: #fff;
+            padding: 1em;
+            box-shadow: 0 0 5px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+    </style>
 </head>
-<body style="font-family: sans-serif; max-width: 700px; margin: auto; padding: 2em; background-color: #f9f9f9;">
+<body>
     <h1 style="text-align: center; color: #333;">Epileptic Seizure Predictor</h1>
 
     <form method="POST" action="/predict_and_explain" enctype="multipart/form-data" style="margin-top: 2em;">
@@ -44,9 +63,21 @@ html_template = """
         <p style="font-size: 1.2em;">
             <strong>Prediction Probability:</strong> {{ '%.2f'|format(probability * 100) }}%
         </p>
-        <br>
-        <h3>LIME Explanation</h3>
-        <iframe src="/static/lime_explanation.html" width="100%" height="400px" style="border: none;"></iframe>
+
+        <div class="two-columns">
+            <div class="column">
+                <h3>LIME Explanation</h3>
+                <iframe src="/static/lime_explanation.html" width="100%" height="400px" style="border: none;"></iframe>
+            </div>
+            <div class="column">
+                <h3>Feature Contributions</h3>
+                <ul>
+                    {% for feature, weight in contributions %}
+                    <li><strong>{{ feature }}</strong>: {{ '%.4f'|format(weight) }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
     {% endif %}
 </body>
 </html>
@@ -73,6 +104,8 @@ def predict_and_explain():
             return render_template_string(html_template, prediction=None)
 
         df = pd.read_csv(file)
+
+        # Drop label columns if present
         for col in ['Class', 'Label', 'Target', 'Pre-Ictal Alert']:
             if col in df.columns:
                 df = df.drop(columns=[col])
@@ -109,7 +142,13 @@ def predict_and_explain():
         os.makedirs("static", exist_ok=True)
         exp.save_to_file(explanation_path)
 
-        return render_template_string(html_template, prediction=prediction, probability=pred_proba)
+        # Get feature contributions for display
+        contributions = [(label, weight) for label, weight in exp.as_list()]
+
+        return render_template_string(html_template,
+                                      prediction=prediction,
+                                      probability=pred_proba,
+                                      contributions=contributions)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
